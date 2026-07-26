@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<robot name="jetpilot_bridge_vehicle" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="base_frame" default="base_link" />
+  <xacro:arg name="camera_frame" default="camera_link" />
+
+  <xacro:arg name="camera_x" default="0.0" />
+  <xacro:arg name="camera_y" default="0.0" />
+  <xacro:arg name="camera_z" default="0.0" />
+  <xacro:arg name="camera_roll" default="0.0" />
+  <xacro:arg name="camera_pitch" default="0.0" />
+  <xacro:arg name="camera_yaw" default="0.0" />
+
+  <link name="$(arg base_frame)" />
+  <link name="$(arg camera_frame)">
+    <visual>
+      <geometry>
+        <box size="0.05 0.03 0.01" />
+      </geometry>
+      <material name="mount_black">
+        <color rgba="0.05 0.05 0.05 1.0" />
+      </material>
+    </visual>
+  </link>
+
+  <joint name="$(arg base_frame)_to_$(arg camera_frame)" type="fixed">
+    <parent link="$(arg base_frame)" />
+    <child link="$(arg camera_frame)" />
+    <origin
+      xyz="$(arg camera_x) $(arg camera_y) $(arg camera_z)"
+      rpy="$(arg camera_roll) $(arg camera_pitch) $(arg camera_yaw)" />
+  </joint>
+</robot>

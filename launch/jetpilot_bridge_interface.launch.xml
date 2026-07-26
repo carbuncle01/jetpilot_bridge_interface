@@ -1,0 +1,38 @@
+<launch>
+    <arg name="use_sim_time" default="false"/>
+    <arg name="vehicle_control_topic" default="/vehicle/control_cmd"/>
+    <arg name="driver_param" default="$(find-pkg-share jetpilot_bridge_interface)/config/jetpilot_bridge_interface_node.param.yaml"/>
+
+    <arg name="publish_description" default="false"/>
+    <arg name="robot_description_xacro" default="$(find-pkg-share jetpilot_bridge_interface)/urdf/jetpilot_bridge_mounts.urdf.xacro"/>
+    <arg name="description_base_frame" default="base_link"/>
+    <arg name="description_camera_frame" default="camera_link"/>
+    <arg name="description_camera_x" default="0.2075"/>
+    <arg name="description_camera_y" default="0.019"/>
+    <arg name="description_camera_z" default="0.065"/>
+    <arg name="description_camera_roll" default="0.0"/>
+    <arg name="description_camera_pitch" default="0.0"/>
+    <arg name="description_camera_yaw" default="0.0"/>
+
+    <node pkg="jetpilot_bridge_interface"
+          exec="jetpilot_bridge_interface_node"
+          name="jetpilot_bridge_interface_node"
+          output="screen">
+        <param from="$(var driver_param)"/>
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+        <remap from="/control_cmd" to="$(var vehicle_control_topic)"/>
+    </node>
+
+    <let
+      name="robot_description"
+      value="$(command 'xacro $(var robot_description_xacro) base_frame:=$(var description_base_frame) camera_frame:=$(var description_camera_frame) camera_x:=$(var description_camera_x) camera_y:=$(var description_camera_y) camera_z:=$(var description_camera_z) camera_roll:=$(var description_camera_roll) camera_pitch:=$(var description_camera_pitch) camera_yaw:=$(var description_camera_yaw)')"/>
+    <node pkg="robot_state_publisher"
+          exec="robot_state_publisher"
+          name="robot_state_publisher"
+          output="screen"
+          if="$(var publish_description)">
+        <param name="robot_description" value="$(var robot_description)"/>
+        <param name="use_tf_static" value="true"/>
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+    </node>
+</launch>
