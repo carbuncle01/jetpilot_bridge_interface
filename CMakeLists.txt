@@ -13,17 +13,17 @@ ament_auto_add_library(${PROJECT_NAME}_protocol SHARED
 )
 target_compile_features(${PROJECT_NAME}_protocol PUBLIC cxx_std_17)
 
-ament_auto_add_library(${PROJECT_NAME}_node SHARED
+ament_auto_add_library(${PROJECT_NAME}_node_impl SHARED
   src/jetpilot_bridge_interface_node.cpp
 )
-target_compile_features(${PROJECT_NAME}_node PUBLIC cxx_std_17)
-target_link_libraries(${PROJECT_NAME}_node ${PROJECT_NAME}_protocol)
+target_compile_features(${PROJECT_NAME}_node_impl PUBLIC cxx_std_17)
+target_link_libraries(${PROJECT_NAME}_node_impl ${PROJECT_NAME}_protocol)
 
 ament_auto_add_executable(jetpilot_bridge_interface_node
   src/jetpilot_bridge_interface_node_main.cpp
 )
 target_compile_features(jetpilot_bridge_interface_node PUBLIC cxx_std_17)
-target_link_libraries(jetpilot_bridge_interface_node ${PROJECT_NAME}_node)
+target_link_libraries(jetpilot_bridge_interface_node ${PROJECT_NAME}_node_impl)
 
 install(DIRECTORY
   config
