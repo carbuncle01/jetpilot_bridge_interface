@@ -6,8 +6,9 @@
 
 - `/vehicle/control_cmd`からUSB CDCコマンドへの変換
 - JPBB-01のRC入力、PWM出力、VBEC、動作経路、fault状態の受信
-- CH3の2位置スイッチ（1000 µs=PROPO、2000 µs=AUTO）とoperation modeの同期
+- CH3の2位置スイッチ（1000 µs付近=PROPO、2000 µs付近=ホスト許可）との連携
 - USB切断、指令timeout、status timeoutの診断
+- USB再接続後の明示的な安全再アーム
 - `base_link`からカメラフレームへの固定TF
 
 ## 起動
@@ -32,13 +33,13 @@ ros2 launch jetpilot_bridge_interface jetpilot_bridge_interface.launch.xml \
 | Topic | Type | 用途 |
 | --- | --- | --- |
 | `/control_cmd` | `jetpilot_msgs/msg/ControlCommand` | 選択済み車両指令。launchで`/vehicle/control_cmd`へremap |
-| `/operation_mode/state` | `jetpilot_msgs/msg/OperationModeState` | AUTO許可要求の生成 |
+| `/operation_mode/state` | `jetpilot_msgs/msg/OperationModeState` | STOP／PROPO／Joy MANUAL／自律AUTOの状態 |
 
 ### Publish
 
 | Topic | Type | 用途 |
 | --- | --- | --- |
-| `/operation_mode/request` | `jetpilot_msgs/msg/OperationModeRequest` | JPBB-01のCH3状態をPROPO/AUTOへ反映 |
+| `/operation_mode/request` | `jetpilot_msgs/msg/OperationModeRequest` | CH3のPROPO要求、基板fault、USB／指令断を反映 |
 | `~/rc_channels` | `std_msgs/msg/Int32MultiArray` | CH1、CH2、CH3入力パルス幅 [µs] |
 | `~/output_channels` | `std_msgs/msg/Int32MultiArray` | サーボ、ESC出力パルス幅 [µs] |
 | `~/vbec_voltage` | `std_msgs/msg/Float32` | VBEC電圧 [V] |
@@ -62,7 +63,7 @@ JPB1,C,sequence,steering_milli,throttle_milli,reverse_milli,brake_milli,flags,CR
 | `reverse_milli` | 0〜1000 |
 | `brake_milli` | 0〜1000 |
 | `flags bit 0` | 指令がtimeout内で有効 |
-| `flags bit 1` | ROS側AUTO要求。STM32側の安全条件を省略してはならない |
+| `flags bit 1` | ホスト経路要求。Joy MANUALと自律AUTOのどちらでも使用 |
 
 USBでは正規化指令を送り、STM32が実機校正値を使って1000〜2000 µsのPWMへ変換します。これにより安全PWM、出力制限、watchdogを基板側で完結できます。
 
@@ -74,12 +75,33 @@ JPB1,S,sequence,rx1_us,rx2_us,rx3_us,servo_us,esc_us,vbec_mv,selector,active_pat
 
 | Field | Definition |
 | --- | --- |
-| `selector` | 0=PROPO、1=AUTO |
-| `active_path` | 0=DISABLED、1=MANUAL、2=AUTO、3=FAILSAFE |
+| `selector` | 0=PROPO、1=ホスト許可 |
+| `active_path` | 0=DISABLED、1=RC、2=HOST、3=FAILSAFE |
 | `fault_bits` | ファームウェア仕様で定義するbit mask。0はfaultなし |
 
-## 安全境界
+`fault_bits`はbit 0から順にVBEC、USB、受信機喪失、CH3中間／不明、RC信号、
+指令timeout、heartbeat timeout、指令値異常を表します。
 
-ROS側の`AUTO_REQUEST`だけで`SAFE_AUTO_SEL`をHighにしてはいけません。STM32は少なくともCH3、RC入力、USB heartbeat、コマンドCRCと範囲、VBEC、watchdogを独立して確認し、条件が崩れたらMANUALまたは定義済み安全状態へ遷移します。
+## 制御権と安全境界
 
-このリポジトリはROS 2側の通信仕様を定義します。対応するSTM32実装は`jetpilot_bridge_firmware`で同じ`JPB1`仕様を実装する想定です。
+CH3がLow側なら受信機CH1／CH2を使用します。CH3がHigh側ならJetsonからの制御を許可しますが、Joy手動と自律走行の選択は従来どおりoperation modeとcommand muxが担当します。CH3 Highだけで自律AUTOへ切り替わることはありません。
+
+STM32はCH3、RC入力、USB、コマンドCRCと範囲、VBEC、watchdogを独立して確認します。条件が崩れた場合は1500/1500 µsのSAFE出力へ遷移してホストをディスアームします。
+
+### USBを抜いて差し直した場合
+
+1. STM32はUSB断または指令200 ms超過を検出し、SAFE出力にしてホストをディスアームします。
+2. bridge nodeはstatus timeout／I/Oエラーを検出し、operation modeへSTOPを要求します。
+3. nodeは既定で1秒ごとに同じデバイスを再オープンします。
+4. 再接続後はニュートラルの非アームフレームだけを送り、以前の操作量を再開しません。
+5. CH3がホスト許可側でstatusが正常になった後、STOPからMANUALまたはAUTOを選び直すと、ニュートラル・ハンドシェイク後に再アームします。
+
+Linux側では実車の`device`を`/dev/serial/by-id/...`に設定してください。
+
+## JetPilot全体からの起動
+
+```bash
+./scripts/bringup.sh drive --vehicle jpbb
+```
+
+Joy手動はMANUAL、自律走行はAUTOを選択します。`command_mux_node`のロジックは変更していません。

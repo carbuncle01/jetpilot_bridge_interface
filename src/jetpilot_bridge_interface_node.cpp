@@ -163,12 +163,28 @@ namespace
 
 int normalized_to_milli(const double value, const double minimum, const double maximum)
 {
-  return static_cast<int>(std::lround(std::clamp(value, minimum, maximum) * 1000.0));
+  if (!std::isfinite(value) || value < minimum || value > maximum)
+  {
+    throw std::invalid_argument("normalized command value is out of range");
+  }
+  return static_cast<int>(std::lround(value * 1000.0));
+}
+
+bool command_values_are_valid(const jetpilot_msgs::msg::ControlCommand & command)
+{
+  const bool fields_are_finite =
+    std::isfinite(command.steering) && std::isfinite(command.throttle) &&
+    std::isfinite(command.reverse) && std::isfinite(command.brake);
+  return fields_are_finite && command.steering >= -1.0 && command.steering <= 1.0 &&
+         command.throttle >= 0.0 && command.throttle <= 1.0 &&
+         command.reverse >= 0.0 && command.reverse <= 1.0 &&
+         command.brake >= 0.0 && command.brake <= 1.0 &&
+         !(command.throttle > 0.0 && command.reverse > 0.0);
 }
 
 const char * selector_name(const RcSelector selector)
 {
-  return selector == RcSelector::automatic ? "AUTO" : "PROPO";
+  return selector == RcSelector::automatic ? "HOST" : "PROPO";
 }
 
 const char * active_path_name(const ActivePath path)
@@ -178,11 +194,25 @@ const char * active_path_name(const ActivePath path)
     case ActivePath::disabled:
       return "DISABLED";
     case ActivePath::manual:
-      return "MANUAL";
+      return "RC";
     case ActivePath::automatic:
-      return "AUTO";
+      return "HOST";
     case ActivePath::failsafe:
       return "FAILSAFE";
+  }
+  return "UNKNOWN";
+}
+
+const char * arm_state_name(const JetpilotBridgeInterfaceNode::HostArmState state)
+{
+  switch (state)
+  {
+    case JetpilotBridgeInterfaceNode::HostArmState::disarmed:
+      return "DISARMED";
+    case JetpilotBridgeInterfaceNode::HostArmState::arming_neutral:
+      return "ARMING_NEUTRAL";
+    case JetpilotBridgeInterfaceNode::HostArmState::armed:
+      return "ARMED";
   }
   return "UNKNOWN";
 }
@@ -202,7 +232,7 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
   device_ = declare_parameter<std::string>("device", "/dev/ttyACM0");
   baud_rate_ = declare_parameter<int>("baud_rate", 115200);
   command_rate_hz_ = std::max(1.0, declare_parameter<double>("command_rate_hz", 100.0));
-  command_timeout_s_ = std::max(0.0, declare_parameter<double>("command_timeout_s", 0.3));
+  command_timeout_s_ = std::max(0.0, declare_parameter<double>("command_timeout_s", 0.2));
   status_timeout_s_ = std::max(0.0, declare_parameter<double>("status_timeout_s", 0.5));
   reconnect_interval_s_ = std::max(0.1, declare_parameter<double>("reconnect_interval_s", 1.0));
   require_status_for_auto_ = declare_parameter<bool>("require_status_for_auto", true);
@@ -216,12 +246,30 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
     [this](const jetpilot_msgs::msg::ControlCommand::SharedPtr message)
     {
       latest_command_ = *message;
-      latest_command_time_ = now();
+      latest_command_time_ = SteadyClock::now();
     });
   mode_subscription_ = create_subscription<jetpilot_msgs::msg::OperationModeState>(
     "/operation_mode/state", rclcpp::QoS(1).transient_local().reliable(),
     [this](const jetpilot_msgs::msg::OperationModeState::SharedPtr message)
-    { operation_mode_ = message->mode; });
+    {
+      const auto previous_mode = operation_mode_;
+      operation_mode_ = message->mode;
+      if (!is_host_mode(operation_mode_))
+      {
+        host_arm_state_ = HostArmState::disarmed;
+        return;
+      }
+
+      // STOP/PROPO -> MANUAL/AUTO is the explicit re-arm gesture.
+      const bool board_permits_host =
+        !require_status_for_auto_ ||
+        (status_is_fresh() && latest_status_ &&
+         latest_status_->selector == RcSelector::automatic && latest_status_->fault_bits == 0U);
+      if (!is_host_mode(previous_mode) && serial_ && board_permits_host)
+      {
+        host_arm_state_ = HostArmState::arming_neutral;
+      }
+    });
 
   mode_request_publisher_ =
     create_publisher<jetpilot_msgs::msg::OperationModeRequest>("/operation_mode/request", 10);
@@ -262,15 +310,18 @@ void JetpilotBridgeInterfaceNode::update()
     try
     {
       read_status();
+      const auto connected_for = serial_open_time_
+        ? std::chrono::duration<double>(SteadyClock::now() - *serial_open_time_).count()
+        : 0.0;
+      if (connected_for > status_timeout_s_ && !status_is_fresh())
+      {
+        throw std::runtime_error("bridge status timeout");
+      }
       write_command();
     }
     catch (const std::exception & error)
     {
-      RCLCPP_ERROR(get_logger(), "Bridge serial connection lost: %s", error.what());
-      serial_.reset();
-      next_reconnect_attempt_ = std::chrono::steady_clock::now() +
-                                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                  std::chrono::duration<double>(reconnect_interval_s_));
+      handle_serial_disconnect(error.what());
     }
   }
   publish_diagnostics_if_due();
@@ -285,6 +336,10 @@ void JetpilotBridgeInterfaceNode::ensure_serial_open()
   try
   {
     serial_ = std::make_unique<SerialPort>(device_, baud_rate_);
+    serial_open_time_ = SteadyClock::now();
+    latest_status_.reset();
+    latest_status_time_.reset();
+    host_arm_state_ = HostArmState::disarmed;
     RCLCPP_INFO(get_logger(), "Connected to jetpilot_bridge_board on %s at %d baud",
                 device_.c_str(), baud_rate_);
   }
@@ -298,16 +353,39 @@ void JetpilotBridgeInterfaceNode::ensure_serial_open()
   }
 }
 
+void JetpilotBridgeInterfaceNode::handle_serial_disconnect(const std::string & reason)
+{
+  RCLCPP_ERROR(get_logger(), "Bridge serial connection lost: %s", reason.c_str());
+  serial_.reset();
+  serial_open_time_.reset();
+  latest_status_.reset();
+  latest_status_time_.reset();
+  host_arm_state_ = HostArmState::disarmed;
+  publish_mode_request(jetpilot_msgs::msg::OperationModeRequest::STOP,
+                       "jetpilot_bridge_usb_lost");
+  next_reconnect_attempt_ = SteadyClock::now() +
+                            std::chrono::duration_cast<SteadyClock::duration>(
+                              std::chrono::duration<double>(reconnect_interval_s_));
+}
+
 bool JetpilotBridgeInterfaceNode::command_is_fresh() const
 {
   return latest_command_ && latest_command_time_ &&
-         (now() - *latest_command_time_).seconds() <= command_timeout_s_;
+         std::chrono::duration<double>(SteadyClock::now() - *latest_command_time_).count() <=
+           command_timeout_s_;
 }
 
 bool JetpilotBridgeInterfaceNode::status_is_fresh() const
 {
   return latest_status_ && latest_status_time_ &&
-         (now() - *latest_status_time_).seconds() <= status_timeout_s_;
+         std::chrono::duration<double>(SteadyClock::now() - *latest_status_time_).count() <=
+           status_timeout_s_;
+}
+
+bool JetpilotBridgeInterfaceNode::is_host_mode(const std::uint8_t mode)
+{
+  return mode == jetpilot_msgs::msg::OperationModeState::MANUAL ||
+         mode == jetpilot_msgs::msg::OperationModeState::AUTO;
 }
 
 void JetpilotBridgeInterfaceNode::write_command()
@@ -315,19 +393,39 @@ void JetpilotBridgeInterfaceNode::write_command()
   CommandFrame frame;
   frame.sequence = sequence_++;
 
-  if (command_is_fresh())
+  const bool fresh_command = command_is_fresh();
+  const bool valid_command =
+    fresh_command && latest_command_ && command_values_are_valid(*latest_command_);
+  const bool host_mode = is_host_mode(operation_mode_);
+  if (host_arm_state_ == HostArmState::arming_neutral && host_mode && valid_command)
+  {
+    // The STM32 only accepts a new arm through a neutral first frame.
+    frame.flags = COMMAND_VALID | HOST_REQUEST;
+  }
+  else if (host_arm_state_ == HostArmState::armed && host_mode && valid_command)
   {
     frame.steering_milli = normalized_to_milli(latest_command_->steering, -1.0, 1.0);
     frame.throttle_milli = normalized_to_milli(latest_command_->throttle, 0.0, 1.0);
     frame.reverse_milli = normalized_to_milli(latest_command_->reverse, 0.0, 1.0);
     frame.brake_milli = normalized_to_milli(latest_command_->brake, 0.0, 1.0);
-    frame.flags |= COMMAND_VALID;
+    frame.flags = COMMAND_VALID | HOST_REQUEST;
   }
-
-  const bool auto_mode = operation_mode_ == jetpilot_msgs::msg::OperationModeState::AUTO;
-  if (auto_mode && (!require_status_for_auto_ || status_is_fresh()))
+  else
   {
-    frame.flags |= AUTO_REQUEST;
+    // Keep transport alive with an explicit neutral frame, but do not grant
+    // host authority. A stale/invalid upstream command also requests STOP.
+    frame.flags = COMMAND_VALID;
+    if (host_arm_state_ != HostArmState::disarmed && !valid_command)
+    {
+      host_arm_state_ = HostArmState::disarmed;
+      if (fresh_command)
+      {
+        ++command_rejections_;
+      }
+      publish_mode_request(jetpilot_msgs::msg::OperationModeRequest::STOP,
+                           fresh_command ? "jetpilot_bridge_command_invalid"
+                                         : "jetpilot_bridge_command_timeout");
+    }
   }
 
   if (!serial_->write_line(encode_command(frame)))
@@ -350,7 +448,25 @@ void JetpilotBridgeInterfaceNode::read_status()
       continue;
     }
     latest_status_ = *status;
-    latest_status_time_ = now();
+    latest_status_time_ = SteadyClock::now();
+    if (status->selector == RcSelector::automatic &&
+        status->active_path == ActivePath::automatic && status->fault_bits == 0U &&
+        host_arm_state_ == HostArmState::arming_neutral)
+    {
+      host_arm_state_ = HostArmState::armed;
+      RCLCPP_INFO(get_logger(), "JPBB host path armed after neutral handshake");
+    }
+    else if (status->active_path == ActivePath::manual)
+    {
+      host_arm_state_ = HostArmState::disarmed;
+    }
+    else if (status->active_path == ActivePath::failsafe &&
+             host_arm_state_ != HostArmState::disarmed)
+    {
+      host_arm_state_ = HostArmState::disarmed;
+      publish_mode_request(jetpilot_msgs::msg::OperationModeRequest::STOP,
+                           "jetpilot_bridge_failsafe");
+    }
     publish_status(*status);
     publish_mode_request_if_needed(*status);
   }
@@ -382,39 +498,61 @@ void JetpilotBridgeInterfaceNode::publish_mode_request_if_needed(const StatusFra
     return;
   }
 
-  const auto current_time = now();
-  const bool selector_changed =
-    !last_requested_selector_ || *last_requested_selector_ != status.selector;
-  const bool refresh_due =
-    !last_mode_request_time_ || (current_time - *last_mode_request_time_).seconds() >= 1.0;
-  if (!selector_changed && !refresh_due)
+  std::optional<std::uint8_t> requested_mode;
+  std::string source;
+  if (status.active_path == ActivePath::manual && status.selector == RcSelector::propo)
+  {
+    requested_mode = jetpilot_msgs::msg::OperationModeRequest::PROPO;
+    source = "jetpilot_bridge_ch3_propo";
+  }
+  else if (status.active_path == ActivePath::failsafe)
+  {
+    requested_mode = jetpilot_msgs::msg::OperationModeRequest::STOP;
+    source = "jetpilot_bridge_board_failsafe";
+  }
+  if (!requested_mode)
   {
     return;
   }
 
-  jetpilot_msgs::msg::OperationModeRequest request;
-  request.header.stamp = current_time;
-  request.header.frame_id = frame_id_;
-  request.mode = status.selector == RcSelector::automatic
-                   ? jetpilot_msgs::msg::OperationModeRequest::AUTO
-                   : jetpilot_msgs::msg::OperationModeRequest::PROPO;
-  request.source = "jetpilot_bridge_ch3";
-  mode_request_publisher_->publish(request);
-  last_requested_selector_ = status.selector;
+  const auto current_time = SteadyClock::now();
+  const bool mode_changed = !last_requested_mode_ || *last_requested_mode_ != *requested_mode;
+  const bool refresh_due =
+    !last_mode_request_time_ ||
+    std::chrono::duration<double>(current_time - *last_mode_request_time_).count() >= 1.0;
+  if (!mode_changed && !refresh_due)
+  {
+    return;
+  }
+
+  publish_mode_request(*requested_mode, source);
+  last_requested_mode_ = *requested_mode;
   last_mode_request_time_ = current_time;
+}
+
+void JetpilotBridgeInterfaceNode::publish_mode_request(const std::uint8_t mode,
+                                                        const std::string & source)
+{
+  jetpilot_msgs::msg::OperationModeRequest request;
+  request.header.stamp = now();
+  request.header.frame_id = frame_id_;
+  request.mode = mode;
+  request.source = source;
+  mode_request_publisher_->publish(request);
 }
 
 void JetpilotBridgeInterfaceNode::publish_diagnostics_if_due()
 {
-  const auto current_time = now();
-  if (last_diagnostics_time_ && (current_time - *last_diagnostics_time_).seconds() < 1.0)
+  const auto current_time = SteadyClock::now();
+  if (last_diagnostics_time_ &&
+      std::chrono::duration<double>(current_time - *last_diagnostics_time_).count() < 1.0)
   {
     return;
   }
   last_diagnostics_time_ = current_time;
 
   diagnostic_msgs::msg::DiagnosticArray array;
-  array.header.stamp = current_time;
+  array.header.stamp = now();
 
   diagnostic_msgs::msg::DiagnosticStatus status;
   status.name = "jetpilot_bridge_interface";
@@ -446,6 +584,11 @@ void JetpilotBridgeInterfaceNode::publish_diagnostics_if_due()
   status.values.push_back(diagnostic_value("status_fresh", status_is_fresh() ? "true" : "false"));
   status.values.push_back(diagnostic_value("protocol_errors", std::to_string(protocol_errors_)));
   status.values.push_back(diagnostic_value("write_drops", std::to_string(write_drops_)));
+  status.values.push_back(
+    diagnostic_value("command_rejections", std::to_string(command_rejections_)));
+  status.values.push_back(diagnostic_value("host_arm_state", arm_state_name(host_arm_state_)));
+  status.values.push_back(diagnostic_value(
+    "require_status_for_host", require_status_for_auto_ ? "true" : "false"));
   if (latest_status_)
   {
     status.values.push_back(diagnostic_value("selector", selector_name(latest_status_->selector)));

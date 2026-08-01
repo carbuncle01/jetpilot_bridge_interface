@@ -27,22 +27,34 @@ class JetpilotBridgeInterfaceNode : public rclcpp::Node
 public:
   JetpilotBridgeInterfaceNode();
   ~JetpilotBridgeInterfaceNode() override;
+  using SteadyClock = std::chrono::steady_clock;
+  using SteadyTime = SteadyClock::time_point;
+
+  enum class HostArmState : std::uint8_t
+  {
+    disarmed = 0,
+    arming_neutral,
+    armed,
+  };
 
 private:
   void update();
   void ensure_serial_open();
+  void handle_serial_disconnect(const std::string & reason);
   bool command_is_fresh() const;
   bool status_is_fresh() const;
+  static bool is_host_mode(std::uint8_t mode);
   void write_command();
   void read_status();
   void publish_status(const StatusFrame & status);
   void publish_mode_request_if_needed(const StatusFrame & status);
+  void publish_mode_request(std::uint8_t mode, const std::string & source);
   void publish_diagnostics_if_due();
 
   std::string device_;
   int baud_rate_{115200};
   double command_rate_hz_{100.0};
-  double command_timeout_s_{0.3};
+  double command_timeout_s_{0.2};
   double status_timeout_s_{0.5};
   double reconnect_interval_s_{1.0};
   bool require_status_for_auto_{true};
@@ -51,18 +63,21 @@ private:
   std::string hardware_id_;
 
   std::unique_ptr<SerialPort> serial_;
+  std::optional<SteadyTime> serial_open_time_;
   std::chrono::steady_clock::time_point next_reconnect_attempt_{};
   std::uint32_t sequence_{0};
   std::uint64_t protocol_errors_{0};
   std::uint64_t write_drops_{0};
+  std::uint64_t command_rejections_{0};
   std::uint8_t operation_mode_{jetpilot_msgs::msg::OperationModeState::STOP};
+  HostArmState host_arm_state_{HostArmState::disarmed};
   std::optional<jetpilot_msgs::msg::ControlCommand> latest_command_;
-  std::optional<rclcpp::Time> latest_command_time_;
+  std::optional<SteadyTime> latest_command_time_;
   std::optional<StatusFrame> latest_status_;
-  std::optional<rclcpp::Time> latest_status_time_;
-  std::optional<RcSelector> last_requested_selector_;
-  std::optional<rclcpp::Time> last_mode_request_time_;
-  std::optional<rclcpp::Time> last_diagnostics_time_;
+  std::optional<SteadyTime> latest_status_time_;
+  std::optional<std::uint8_t> last_requested_mode_;
+  std::optional<SteadyTime> last_mode_request_time_;
+  std::optional<SteadyTime> last_diagnostics_time_;
 
   rclcpp::Subscription<jetpilot_msgs::msg::ControlCommand>::SharedPtr command_subscription_;
   rclcpp::Subscription<jetpilot_msgs::msg::OperationModeState>::SharedPtr mode_subscription_;

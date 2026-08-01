@@ -68,7 +68,7 @@ std::uint16_t crc16_ccitt(const std::string & data)
 
 std::string encode_command(const CommandFrame & frame)
 {
-  constexpr std::uint16_t valid_flags = COMMAND_VALID | AUTO_REQUEST;
+  constexpr std::uint16_t valid_flags = COMMAND_VALID | HOST_REQUEST;
   if (
     frame.steering_milli < -1000 || frame.steering_milli > 1000 ||
     frame.throttle_milli < 0 || frame.throttle_milli > 1000 ||

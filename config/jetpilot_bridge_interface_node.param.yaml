@@ -6,15 +6,16 @@
 
     ## Host command and safety timeouts.
     command_rate_hz: 100.0
-    command_timeout_s: 0.3
+    command_timeout_s: 0.2
     status_timeout_s: 0.5
     reconnect_interval_s: 1.0
 
-    ## AUTO_REQUEST is not sent until a valid board status has been received.
+    ## Historical parameter name. Both Joy MANUAL and autonomous AUTO use the
+    ## host path; keep this true so arming requires fresh, fault-free board status.
     require_status_for_auto: true
 
-    ## Mirror the physical two-position CH3 selector into JetPilot operation mode.
-    ## CH3 low (about 1000us) -> PROPO, high (about 2000us) -> AUTO.
+    ## CH3 low requests PROPO. CH3 high only permits host control and does not
+    ## choose between Joy MANUAL and autonomous AUTO.
     publish_mode_request: true
 
     frame_id: jetpilot_bridge

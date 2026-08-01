@@ -32,7 +32,7 @@ TEST(BridgeProtocol, EncodesNormalizedCommandFields)
   frame.throttle_milli = 750;
   frame.reverse_milli = 0;
   frame.brake_milli = 100;
-  frame.flags = COMMAND_VALID | AUTO_REQUEST;
+  frame.flags = COMMAND_VALID | HOST_REQUEST;
 
   const auto encoded = encode_command(frame);
   EXPECT_EQ(encoded, with_crc("JPB1,C,42,-500,750,0,100,3"));

@@ -12,7 +12,10 @@ constexpr char kProtocolVersion[] = "JPB1";
 enum CommandFlag : std::uint16_t
 {
   COMMAND_VALID = 1U << 0,
-  AUTO_REQUEST = 1U << 1,
+  HOST_REQUEST = 1U << 1,
+  // Backward-compatible spelling. This bit selects the STM32 host path for
+  // both joystick MANUAL and autonomous AUTO control.
+  AUTO_REQUEST = HOST_REQUEST,
 };
 
 enum class RcSelector : std::uint8_t
