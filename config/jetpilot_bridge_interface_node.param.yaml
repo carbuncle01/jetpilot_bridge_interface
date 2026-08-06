@@ -10,6 +10,11 @@
     status_timeout_s: 0.5
     reconnect_interval_s: 1.0
 
+    ## Host-path steering trim in normalized command units. Joy D-pad right/left
+    ## adjusts this value by offset_step while the node is running.
+    steering_offset: 0.0
+    offset_step: 0.01
+
     ## Historical parameter name. Both Joy MANUAL and autonomous AUTO use the
     ## host path; keep this true so arming requires fresh, fault-free board status.
     require_status_for_auto: true

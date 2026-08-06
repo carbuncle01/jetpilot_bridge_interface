@@ -34,6 +34,8 @@ ros2 launch jetpilot_bridge_interface jetpilot_bridge_interface.launch.xml \
 | --- | --- | --- |
 | `/control_cmd` | `jetpilot_msgs/msg/ControlCommand` | 選択済み車両指令。launchで`/vehicle/control_cmd`へremap |
 | `/operation_mode/state` | `jetpilot_msgs/msg/OperationModeState` | STOP／PROPO／Joy MANUAL／自律AUTOの状態 |
+| `/steer_offset_inc` | `std_msgs/msg/Bool` | `true`でホスト経路のsteering offsetを`offset_step`増やす |
+| `/steer_offset_dec` | `std_msgs/msg/Bool` | `true`でホスト経路のsteering offsetを`offset_step`減らす |
 
 ### Publish
 
@@ -66,6 +68,13 @@ JPB1,C,sequence,steering_milli,throttle_milli,reverse_milli,brake_milli,flags,CR
 | `flags bit 1` | ホスト経路要求。Joy MANUALと自律AUTOのどちらでも使用 |
 
 USBでは正規化指令を送り、STM32が実機校正値を使って1000〜2000 µsのPWMへ変換します。これにより安全PWM、出力制限、watchdogを基板側で完結できます。
+
+`steering_offset`は送信前のsteering指令へ加算され、結果は`[-1.0, 1.0]`へ
+clampされます。既定のJoy設定では十字キー右／左がそれぞれ
+`/steer_offset_inc`／`/steer_offset_dec`をpublishするため、PCA9685と同じ操作で
+JPBBのホスト経路を調整できます。この値はJoy MANUALと自律AUTOに適用され、
+基板内で直接選択されるPROPO経路には適用されません。起動時の初期値を残すには
+parameter YAMLの`steering_offset`を更新してください。
 
 ### STM32からJetson
 

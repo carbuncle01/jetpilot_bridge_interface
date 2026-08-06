@@ -235,6 +235,8 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
   command_timeout_s_ = std::max(0.0, declare_parameter<double>("command_timeout_s", 0.2));
   status_timeout_s_ = std::max(0.0, declare_parameter<double>("status_timeout_s", 0.5));
   reconnect_interval_s_ = std::max(0.1, declare_parameter<double>("reconnect_interval_s", 1.0));
+  declare_parameter<double>("steering_offset", 0.0);
+  declare_parameter<double>("offset_step", 0.01);
   require_status_for_auto_ = declare_parameter<bool>("require_status_for_auto", true);
   publish_mode_request_ = declare_parameter<bool>("publish_mode_request", true);
   frame_id_ = declare_parameter<std::string>("frame_id", "jetpilot_bridge");
@@ -247,6 +249,22 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
     {
       latest_command_ = *message;
       latest_command_time_ = SteadyClock::now();
+    });
+  steer_offset_inc_subscription_ = create_subscription<std_msgs::msg::Bool>(
+    "/steer_offset_inc", 10, [this](const std_msgs::msg::Bool::SharedPtr message)
+    {
+      if (message->data)
+      {
+        shift_steering_offset(1.0);
+      }
+    });
+  steer_offset_dec_subscription_ = create_subscription<std_msgs::msg::Bool>(
+    "/steer_offset_dec", 10, [this](const std_msgs::msg::Bool::SharedPtr message)
+    {
+      if (message->data)
+      {
+        shift_steering_offset(-1.0);
+      }
     });
   mode_subscription_ = create_subscription<jetpilot_msgs::msg::OperationModeState>(
     "/operation_mode/state", rclcpp::QoS(1).transient_local().reliable(),
@@ -404,7 +422,10 @@ void JetpilotBridgeInterfaceNode::write_command()
   }
   else if (host_arm_state_ == HostArmState::armed && host_mode && valid_command)
   {
-    frame.steering_milli = normalized_to_milli(latest_command_->steering, -1.0, 1.0);
+    const auto steering = std::clamp(
+      static_cast<double>(latest_command_->steering) +
+      get_parameter("steering_offset").as_double(), -1.0, 1.0);
+    frame.steering_milli = normalized_to_milli(steering, -1.0, 1.0);
     frame.throttle_milli = normalized_to_milli(latest_command_->throttle, 0.0, 1.0);
     frame.reverse_milli = normalized_to_milli(latest_command_->reverse, 0.0, 1.0);
     frame.brake_milli = normalized_to_milli(latest_command_->brake, 0.0, 1.0);
@@ -586,6 +607,8 @@ void JetpilotBridgeInterfaceNode::publish_diagnostics_if_due()
   status.values.push_back(diagnostic_value("write_drops", std::to_string(write_drops_)));
   status.values.push_back(
     diagnostic_value("command_rejections", std::to_string(command_rejections_)));
+  status.values.push_back(diagnostic_value(
+    "steering_offset", std::to_string(get_parameter("steering_offset").as_double())));
   status.values.push_back(diagnostic_value("host_arm_state", arm_state_name(host_arm_state_)));
   status.values.push_back(diagnostic_value(
     "require_status_for_host", require_status_for_auto_ ? "true" : "false"));
@@ -603,6 +626,15 @@ void JetpilotBridgeInterfaceNode::publish_diagnostics_if_due()
 
   array.status.push_back(status);
   diagnostics_publisher_->publish(array);
+}
+
+void JetpilotBridgeInterfaceNode::shift_steering_offset(const double direction)
+{
+  const auto current_offset = get_parameter("steering_offset").as_double();
+  const auto offset_step = std::max(0.0, get_parameter("offset_step").as_double());
+  const auto next_offset = std::clamp(current_offset + offset_step * direction, -1.0, 1.0);
+  set_parameter(rclcpp::Parameter("steering_offset", next_offset));
+  RCLCPP_INFO(get_logger(), "Steering offset set to %.3f", next_offset);
 }
 
 }  // namespace jetpilot_bridge_interface

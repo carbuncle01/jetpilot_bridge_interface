@@ -13,6 +13,7 @@
 #include "jetpilot_msgs/msg/operation_mode_request.hpp"
 #include "jetpilot_msgs/msg/operation_mode_state.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/int32_multi_array.hpp"
 #include "std_msgs/msg/u_int8.hpp"
@@ -50,6 +51,7 @@ private:
   void publish_mode_request_if_needed(const StatusFrame & status);
   void publish_mode_request(std::uint8_t mode, const std::string & source);
   void publish_diagnostics_if_due();
+  void shift_steering_offset(double direction);
 
   std::string device_;
   int baud_rate_{115200};
@@ -81,6 +83,8 @@ private:
 
   rclcpp::Subscription<jetpilot_msgs::msg::ControlCommand>::SharedPtr command_subscription_;
   rclcpp::Subscription<jetpilot_msgs::msg::OperationModeState>::SharedPtr mode_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr steer_offset_inc_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr steer_offset_dec_subscription_;
   rclcpp::Publisher<jetpilot_msgs::msg::OperationModeRequest>::SharedPtr mode_request_publisher_;
   rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr rc_channels_publisher_;
   rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr output_channels_publisher_;

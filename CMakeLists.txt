@@ -37,6 +37,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_bridge_protocol test/test_bridge_protocol.cpp)
   target_link_libraries(test_bridge_protocol ${PROJECT_NAME}_protocol)
+
+  ament_add_gtest(test_steering_offset test/test_steering_offset.cpp)
+  target_link_libraries(test_steering_offset ${PROJECT_NAME}_node_impl)
 endif()
 
 ament_auto_package(USE_SCOPED_HEADER_INSTALL_DIR)
