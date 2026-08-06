@@ -105,3 +105,16 @@ Linux側では実車の`device`を`/dev/serial/by-id/...`に設定してくだ�
 ```
 
 Joy手動はMANUAL、自律走行はAUTOを選択します。`command_mux_node`のロジックは変更していません。
+
+## Step 8ファームウェア
+
+実車用に確認中のStep 8 HEXを[`firmware`](firmware/README.md)へ同梱しています。
+パッケージのビルド後はshareディレクトリにもinstallされます。
+
+```bash
+FIRMWARE_DIR="$(ros2 pkg prefix --share jetpilot_bridge_interface)/firmware"
+sha256sum -c "${FIRMWARE_DIR}/SHA256SUMS"
+```
+
+このHEXはJPB1指令について、1500 µsをニュートラル、1000 µs側を
+前進スロットル、2000 µs側をブレーキ／後進として変換します。

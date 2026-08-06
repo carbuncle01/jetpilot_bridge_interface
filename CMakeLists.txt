@@ -27,6 +27,7 @@ target_link_libraries(jetpilot_bridge_interface_node ${PROJECT_NAME}_node_impl)
 
 install(DIRECTORY
   config
+  firmware
   launch
   urdf
   DESTINATION share/${PROJECT_NAME}
