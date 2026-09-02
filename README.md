@@ -69,7 +69,9 @@ JPB1,C,sequence,steering_milli,throttle_milli,reverse_milli,brake_milli,flags,CR
 
 USBでは正規化指令を送り、STM32が実機校正値を使って1000〜2000 µsのPWMへ変換します。これにより安全PWM、出力制限、watchdogを基板側で完結できます。
 
-`steering_offset`は送信前のsteering指令へ加算され、結果は`[-1.0, 1.0]`へ
+ROS内部のsteering規約は正が左です。`steering_scale`は車両境界で指令へ乗算され、
+JPBB-01の負が左という実機規約に合わせる既定値は`-1.0`です。
+`steering_offset`はscale適用後のsteering指令へ加算され、結果は`[-1.0, 1.0]`へ
 clampされます。既定のJoy設定では十字キー右／左がそれぞれ
 `/steer_offset_inc`／`/steer_offset_dec`をpublishするため、PCA9685と同じ操作で
 JPBBのホスト経路を調整できます。この値はJoy MANUALと自律AUTOに適用され、

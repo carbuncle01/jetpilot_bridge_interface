@@ -59,6 +59,7 @@ private:
   double command_timeout_s_{0.2};
   double status_timeout_s_{0.5};
   double reconnect_interval_s_{1.0};
+  double steering_scale_{-1.0};
   bool require_status_for_auto_{true};
   bool publish_mode_request_{true};
   std::string frame_id_;

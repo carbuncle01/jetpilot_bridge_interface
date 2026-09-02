@@ -10,7 +10,11 @@
     status_timeout_s: 0.5
     reconnect_interval_s: 1.0
 
-    ## Host-path steering trim in normalized command units. Joy D-pad right/left
+    ## ROS ControlCommand uses positive=left. JPBB-01 hardware uses negative=left,
+    ## so invert once at the vehicle boundary for both Joy MANUAL and AUTO.
+    steering_scale: -1.0
+
+    ## Host-path steering trim in hardware command units. Joy D-pad right/left
     ## adjusts this value by offset_step while the node is running.
     steering_offset: 0.0
     offset_step: 0.01

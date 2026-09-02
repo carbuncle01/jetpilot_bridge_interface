@@ -22,6 +22,7 @@ protected:
 
 TEST_F(SteeringOffsetTest, JoyOffsetTopicsAdjustTheRuntimeParameter) {
   auto bridge = std::make_shared<JetpilotBridgeInterfaceNode>();
+  EXPECT_DOUBLE_EQ(bridge->get_parameter("steering_scale").as_double(), -1.0);
   auto test_node =
     std::make_shared<rclcpp::Node>("steering_offset_test_publisher");
   auto increment =
