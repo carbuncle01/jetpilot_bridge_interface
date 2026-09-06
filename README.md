@@ -1,5 +1,7 @@
 # jetpilot_bridge_interface
 
+## Purpose
+
 `jetpilot_bridge_interface`は、JPBB-01 `jetpilot_bridge_board`をJetPilotの車両制御へ接続するROS 2パッケージです。
 
 次の機能を一つのvehicle interfaceとして提供します。
@@ -11,7 +13,54 @@
 - USB再接続後の明示的な安全再アーム
 - `base_link`からカメラフレームへの固定TF
 
-## 起動
+## Nodes
+
+| Node | Executable | Description |
+| --- | --- | --- |
+| `jetpilot_bridge_interface_node` | `jetpilot_bridge_interface_node` | ROS制御指令とJPB1 USB protocolを相互変換する |
+| `robot_state_publisher` | `robot_state_publisher` | 任意でvehicle mountのstatic TFをpublishする |
+
+## Inputs / Outputs
+
+### Input topics
+
+| Node | Name | Type | QoS | Description |
+| --- | --- | --- | --- | --- |
+| `jetpilot_bridge_interface_node` | `/vehicle/control_cmd` | `jetpilot_msgs/msg/ControlCommand` | Best Effort / Volatile | node内の`/control_cmd`をlaunchで標準remap |
+| `jetpilot_bridge_interface_node` | `/operation_mode/state` | `jetpilot_msgs/msg/OperationModeState` | Reliable / Transient Local | STOP/PROPO/MANUAL/AUTO状態 |
+| `jetpilot_bridge_interface_node` | `/steer_offset_inc` | `std_msgs/msg/Bool` | Reliable / Volatile | host steering offset増加 |
+| `jetpilot_bridge_interface_node` | `/steer_offset_dec` | `std_msgs/msg/Bool` | Reliable / Volatile | host steering offset減少 |
+
+### Output topics
+
+| Node | Name | Type | QoS | Description |
+| --- | --- | --- | --- | --- |
+| `jetpilot_bridge_interface_node` | `/operation_mode/request` | `jetpilot_msgs/msg/OperationModeRequest` | Reliable / Volatile | CH3、fault、通信断に応じたmode要求 |
+| `jetpilot_bridge_interface_node` | `~/rc_channels` | `std_msgs/msg/Int32MultiArray` | Reliable / Volatile | CH1/CH2/CH3入力pulse [µs] |
+| `jetpilot_bridge_interface_node` | `~/output_channels` | `std_msgs/msg/Int32MultiArray` | Reliable / Volatile | servo/ESC出力pulse [µs] |
+| `jetpilot_bridge_interface_node` | `~/vbec_voltage` | `std_msgs/msg/Float32` | Reliable / Volatile | VBEC電圧 [V] |
+| `jetpilot_bridge_interface_node` | `~/active_path` | `std_msgs/msg/UInt8` | Reliable / Volatile | DISABLED/RC/HOST/FAILSAFE状態 |
+| `jetpilot_bridge_interface_node` | `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | Reliable / Volatile | 接続、timeout、board fault |
+
+### TF
+
+| Node | Parent | Child | Mode | Description |
+| --- | --- | --- | --- | --- |
+| `robot_state_publisher` | `base_link` | configured camera frame | Static publish | `publish_description:=true`時のcamera mount |
+
+## Parameters
+
+serial device、通信rate、watchdog、steering変換、安全状態などは
+[`config/jetpilot_bridge_interface_node.param.yaml`](config/jetpilot_bridge_interface_node.param.yaml)を
+参照してください。
+
+## Assumptions / Known limits
+
+- 実車では再enumerationに強い`/dev/serial/by-id/...`を使用します。
+- JPBB-01 firmwareとnodeのJPB1 protocol versionが一致している必要があります。
+- USB再接続後はSTOPからMANUALまたはAUTOを選び直すまでhost pathを再armしません。
+
+## How to launch
 
 ```bash
 ros2 launch jetpilot_bridge_interface jetpilot_bridge_interface.launch.xml \
@@ -25,28 +74,6 @@ ros2 launch jetpilot_bridge_interface jetpilot_bridge_interface.launch.xml \
   ros__parameters:
     device: /dev/serial/by-id/usb-JetPilot_JPBB-01_...
 ```
-
-## ROSインターフェース
-
-### Subscribe
-
-| Topic | Type | 用途 |
-| --- | --- | --- |
-| `/control_cmd` | `jetpilot_msgs/msg/ControlCommand` | 選択済み車両指令。launchで`/vehicle/control_cmd`へremap |
-| `/operation_mode/state` | `jetpilot_msgs/msg/OperationModeState` | STOP／PROPO／Joy MANUAL／自律AUTOの状態 |
-| `/steer_offset_inc` | `std_msgs/msg/Bool` | `true`でホスト経路のsteering offsetを`offset_step`増やす |
-| `/steer_offset_dec` | `std_msgs/msg/Bool` | `true`でホスト経路のsteering offsetを`offset_step`減らす |
-
-### Publish
-
-| Topic | Type | 用途 |
-| --- | --- | --- |
-| `/operation_mode/request` | `jetpilot_msgs/msg/OperationModeRequest` | CH3のPROPO要求、基板fault、USB／指令断を反映 |
-| `~/rc_channels` | `std_msgs/msg/Int32MultiArray` | CH1、CH2、CH3入力パルス幅 [µs] |
-| `~/output_channels` | `std_msgs/msg/Int32MultiArray` | サーボ、ESC出力パルス幅 [µs] |
-| `~/vbec_voltage` | `std_msgs/msg/Float32` | VBEC電圧 [V] |
-| `~/active_path` | `std_msgs/msg/UInt8` | 0=DISABLED、1=MANUAL、2=AUTO、3=FAILSAFE |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | 接続、timeout、基板fault状態 |
 
 ## USBプロトコル JPB1
 
