@@ -56,8 +56,29 @@ struct StatusFrame
   std::uint32_t fault_bits{0};
 };
 
+struct PropoCalibration
+{
+  int steering_left_us{1000};
+  int steering_neutral_us{1500};
+  int steering_right_us{2000};
+  int throttle_forward_us{1000};
+  int throttle_neutral_us{1500};
+  int throttle_reverse_us{2000};
+};
+
+struct PropoCommand
+{
+  float steering{0.0F};
+  float throttle{0.0F};
+  float reverse{0.0F};
+  float brake{0.0F};
+};
+
 std::uint16_t crc16_ccitt(const std::string & data);
 std::string encode_command(const CommandFrame & frame);
 std::optional<StatusFrame> parse_status(const std::string & line, std::string * error = nullptr);
+bool propo_calibration_is_valid(const PropoCalibration & calibration);
+std::optional<PropoCommand> propo_pwm_to_command(
+  int steering_us, int throttle_us, const PropoCalibration & calibration);
 
 }  // namespace jetpilot_bridge_interface

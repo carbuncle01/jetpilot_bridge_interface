@@ -82,5 +82,45 @@ TEST(BridgeProtocol, RejectsOutOfRangePulse)
   EXPECT_EQ(error, "status frame value is out of range");
 }
 
+TEST(BridgeProtocol, ConvertsPropoPwmUsingHostInverseMapping)
+{
+  const PropoCalibration calibration;
+
+  const auto neutral = propo_pwm_to_command(1500, 1500, calibration);
+  ASSERT_TRUE(neutral);
+  EXPECT_FLOAT_EQ(neutral->steering, 0.0F);
+  EXPECT_FLOAT_EQ(neutral->throttle, 0.0F);
+  EXPECT_FLOAT_EQ(neutral->reverse, 0.0F);
+
+  const auto left_forward = propo_pwm_to_command(1000, 1000, calibration);
+  ASSERT_TRUE(left_forward);
+  EXPECT_FLOAT_EQ(left_forward->steering, 1.0F);
+  EXPECT_FLOAT_EQ(left_forward->throttle, 1.0F);
+  EXPECT_FLOAT_EQ(left_forward->reverse, 0.0F);
+
+  const auto right_reverse = propo_pwm_to_command(2000, 2000, calibration);
+  ASSERT_TRUE(right_reverse);
+  EXPECT_FLOAT_EQ(right_reverse->steering, -1.0F);
+  EXPECT_FLOAT_EQ(right_reverse->throttle, 0.0F);
+  EXPECT_FLOAT_EQ(right_reverse->reverse, 1.0F);
+}
+
+TEST(BridgeProtocol, PreservesMeasuredPropoAuthorityRelativeToHostPwm)
+{
+  const auto command = propo_pwm_to_command(1073, 1078, PropoCalibration{});
+  ASSERT_TRUE(command);
+  EXPECT_NEAR(command->steering, 0.854F, 1.0e-6F);
+  EXPECT_NEAR(command->throttle, 0.844F, 1.0e-6F);
+}
+
+TEST(BridgeProtocol, RejectsInvalidPropoCalibrationAndMissingPulse)
+{
+  auto calibration = PropoCalibration{};
+  calibration.throttle_forward_us = calibration.throttle_neutral_us;
+  EXPECT_FALSE(propo_calibration_is_valid(calibration));
+  EXPECT_FALSE(propo_pwm_to_command(1500, 1500, calibration));
+  EXPECT_FALSE(propo_pwm_to_command(0, 1500, PropoCalibration{}));
+}
+
 }  // namespace
 }  // namespace jetpilot_bridge_interface

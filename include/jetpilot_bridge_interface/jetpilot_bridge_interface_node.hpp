@@ -48,6 +48,7 @@ private:
   void write_command();
   void read_status();
   void publish_status(const StatusFrame & status);
+  void publish_propo_command(const StatusFrame & status);
   void publish_mode_request_if_needed(const StatusFrame & status);
   void publish_mode_request(std::uint8_t mode, const std::string & source);
   void publish_diagnostics_if_due();
@@ -62,8 +63,11 @@ private:
   double steering_scale_{-1.0};
   bool require_status_for_auto_{true};
   bool publish_mode_request_{true};
+  bool publish_propo_command_{true};
   std::string frame_id_;
   std::string hardware_id_;
+  std::string propo_frame_id_;
+  PropoCalibration propo_calibration_;
 
   std::unique_ptr<SerialPort> serial_;
   std::optional<SteadyTime> serial_open_time_;
@@ -91,6 +95,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr output_channels_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr vbec_publisher_;
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr active_path_publisher_;
+  rclcpp::Publisher<jetpilot_msgs::msg::ControlCommand>::SharedPtr propo_command_publisher_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

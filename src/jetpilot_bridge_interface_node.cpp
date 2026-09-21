@@ -245,8 +245,27 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
   declare_parameter<double>("offset_step", 0.01);
   require_status_for_auto_ = declare_parameter<bool>("require_status_for_auto", true);
   publish_mode_request_ = declare_parameter<bool>("publish_mode_request", true);
+  publish_propo_command_ = declare_parameter<bool>("publish_propo_command", true);
   frame_id_ = declare_parameter<std::string>("frame_id", "jetpilot_bridge");
   hardware_id_ = declare_parameter<std::string>("hardware_id", "JPBB-01");
+  propo_frame_id_ = declare_parameter<std::string>("propo_frame_id", "rc_receiver");
+  propo_calibration_.steering_left_us =
+    declare_parameter<int>("propo_steering_left_us", 1000);
+  propo_calibration_.steering_neutral_us =
+    declare_parameter<int>("propo_steering_neutral_us", 1500);
+  propo_calibration_.steering_right_us =
+    declare_parameter<int>("propo_steering_right_us", 2000);
+  propo_calibration_.throttle_forward_us =
+    declare_parameter<int>("propo_throttle_forward_us", 1000);
+  propo_calibration_.throttle_neutral_us =
+    declare_parameter<int>("propo_throttle_neutral_us", 1500);
+  propo_calibration_.throttle_reverse_us =
+    declare_parameter<int>("propo_throttle_reverse_us", 2000);
+  if (!propo_calibration_is_valid(propo_calibration_))
+  {
+    throw std::invalid_argument(
+      "PROPO PWM calibration must be ordered left/forward < neutral < right/reverse");
+  }
 
   const auto qos_command = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
   command_subscription_ = create_subscription<jetpilot_msgs::msg::ControlCommand>(
@@ -302,6 +321,8 @@ JetpilotBridgeInterfaceNode::JetpilotBridgeInterfaceNode() : Node("jetpilot_brid
     create_publisher<std_msgs::msg::Int32MultiArray>("~/output_channels", 10);
   vbec_publisher_ = create_publisher<std_msgs::msg::Float32>("~/vbec_voltage", 10);
   active_path_publisher_ = create_publisher<std_msgs::msg::UInt8>("~/active_path", 10);
+  propo_command_publisher_ = create_publisher<jetpilot_msgs::msg::ControlCommand>(
+    "/propo/control_cmd", qos_command);
   diagnostics_publisher_ =
     create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
 
@@ -495,8 +516,34 @@ void JetpilotBridgeInterfaceNode::read_status()
                            "jetpilot_bridge_failsafe");
     }
     publish_status(*status);
+    publish_propo_command(*status);
     publish_mode_request_if_needed(*status);
   }
+}
+
+void JetpilotBridgeInterfaceNode::publish_propo_command(const StatusFrame & status)
+{
+  if (!publish_propo_command_ || status.selector != RcSelector::propo ||
+    status.active_path != ActivePath::manual)
+  {
+    return;
+  }
+
+  const auto converted = propo_pwm_to_command(
+    status.rx1_us, status.rx2_us, propo_calibration_);
+  if (!converted)
+  {
+    return;
+  }
+
+  jetpilot_msgs::msg::ControlCommand command;
+  command.header.stamp = now();
+  command.header.frame_id = propo_frame_id_;
+  command.steering = converted->steering;
+  command.throttle = converted->throttle;
+  command.reverse = converted->reverse;
+  command.brake = converted->brake;
+  propo_command_publisher_->publish(command);
 }
 
 void JetpilotBridgeInterfaceNode::publish_status(const StatusFrame & status)

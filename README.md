@@ -8,6 +8,7 @@
 
 - `/vehicle/control_cmd`からUSB CDCコマンドへの変換
 - JPBB-01のRC入力、PWM出力、VBEC、動作経路、fault状態の受信
+- PROPO選択中の受信機PWMを正規化した教師用`/propo/control_cmd`の生成
 - CH3の2位置スイッチ（1000 µs付近=PROPO、2000 µs付近=ホスト許可）との連携
 - USB切断、指令timeout、status timeoutの診断
 - USB再接続後の明示的な安全再アーム
@@ -36,6 +37,7 @@
 | Node | Name | Type | QoS | Description |
 | --- | --- | --- | --- | --- |
 | `jetpilot_bridge_interface_node` | `/operation_mode/request` | `jetpilot_msgs/msg/OperationModeRequest` | Reliable / Volatile | CH3、fault、通信断に応じたmode要求 |
+| `jetpilot_bridge_interface_node` | `/propo/control_cmd` | `jetpilot_msgs/msg/ControlCommand` | Best Effort / Volatile | RC直接経路のPWMをホストPWM変換の逆写像で正規化 |
 | `jetpilot_bridge_interface_node` | `~/rc_channels` | `std_msgs/msg/Int32MultiArray` | Reliable / Volatile | CH1/CH2/CH3入力pulse [µs] |
 | `jetpilot_bridge_interface_node` | `~/output_channels` | `std_msgs/msg/Int32MultiArray` | Reliable / Volatile | servo/ESC出力pulse [µs] |
 | `jetpilot_bridge_interface_node` | `~/vbec_voltage` | `std_msgs/msg/Float32` | Reliable / Volatile | VBEC電圧 [V] |
@@ -104,6 +106,26 @@ clampされます。既定のJoy設定では十字キー右／左がそれぞれ
 JPBBのホスト経路を調整できます。この値はJoy MANUALと自律AUTOに適用され、
 基板内で直接選択されるPROPO経路には適用されません。起動時の初期値を残すには
 parameter YAMLの`steering_offset`を更新してください。
+
+### PROPO教師指令
+
+JPBBが実際にRC直接経路を選択している間だけ、受信機のCH1/CH2 PWMを
+`/propo/control_cmd`へ変換してpublishします。既定の逆変換は次の対応です。
+
+```text
+steering: 1000 us=左+1、1500 us=中央0、2000 us=右-1
+throttle: 1000 us=前進1、1500 us=停止0、2000 us=reverse 1
+```
+
+値は`propo_steering_*_us`と`propo_throttle_*_us`で変更できます。既定値は
+ホスト経路の1000／1500／2000 us変換の逆写像であり、受信機の到達端を必ず
+±1へ引き伸ばす校正ではありません。そのため、例えば前進端が1078 usなら
+教師throttleは約0.844となり、同じ物理PWMを生成するteleop指令と一致します。
+
+CH2の1500 usより大きい側は`reverse`として表現します。現在のE2E control教師は
+`steering`と`throttle`を使用するため、ブレーキ／後進区間のthrottleは0です。
+PROPO教師でデータセットを作る場合は、rosbagへ`/propo/control_cmd`を記録し、
+前処理のcontrol topicにも同topicを指定します。
 
 ### STM32からJetson
 

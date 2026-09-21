@@ -1,5 +1,6 @@
 #include "jetpilot_bridge_interface/bridge_protocol.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <iomanip>
 #include <sstream>
@@ -48,6 +49,11 @@ bool parse_integer(const std::string_view text, IntegerT & output, const int bas
 bool pulse_is_valid(const int pulse_us)
 {
   return pulse_us == 0 || (pulse_us >= 800 && pulse_us <= 2200);
+}
+
+float clamp_normalized(const double value)
+{
+  return static_cast<float>(std::clamp(value, 0.0, 1.0));
 }
 
 }  // namespace
@@ -163,6 +169,58 @@ std::optional<StatusFrame> parse_status(const std::string & line, std::string * 
   frame.selector = static_cast<RcSelector>(selector);
   frame.active_path = static_cast<ActivePath>(active_path);
   return frame;
+}
+
+bool propo_calibration_is_valid(const PropoCalibration & calibration)
+{
+  constexpr int minimum_pulse_us = 800;
+  constexpr int maximum_pulse_us = 2200;
+  return calibration.steering_left_us >= minimum_pulse_us &&
+         calibration.steering_right_us <= maximum_pulse_us &&
+         calibration.throttle_forward_us >= minimum_pulse_us &&
+         calibration.throttle_reverse_us <= maximum_pulse_us &&
+         calibration.steering_left_us < calibration.steering_neutral_us &&
+         calibration.steering_neutral_us < calibration.steering_right_us &&
+         calibration.throttle_forward_us < calibration.throttle_neutral_us &&
+         calibration.throttle_neutral_us < calibration.throttle_reverse_us;
+}
+
+std::optional<PropoCommand> propo_pwm_to_command(
+  const int steering_us, const int throttle_us, const PropoCalibration & calibration)
+{
+  if (!propo_calibration_is_valid(calibration) || !pulse_is_valid(steering_us) ||
+    !pulse_is_valid(throttle_us) || steering_us == 0 || throttle_us == 0)
+  {
+    return std::nullopt;
+  }
+
+  PropoCommand command;
+  if (steering_us <= calibration.steering_neutral_us)
+  {
+    command.steering = clamp_normalized(
+      static_cast<double>(calibration.steering_neutral_us - steering_us) /
+      static_cast<double>(calibration.steering_neutral_us - calibration.steering_left_us));
+  }
+  else
+  {
+    command.steering = -clamp_normalized(
+      static_cast<double>(steering_us - calibration.steering_neutral_us) /
+      static_cast<double>(calibration.steering_right_us - calibration.steering_neutral_us));
+  }
+
+  if (throttle_us <= calibration.throttle_neutral_us)
+  {
+    command.throttle = clamp_normalized(
+      static_cast<double>(calibration.throttle_neutral_us - throttle_us) /
+      static_cast<double>(calibration.throttle_neutral_us - calibration.throttle_forward_us));
+  }
+  else
+  {
+    command.reverse = clamp_normalized(
+      static_cast<double>(throttle_us - calibration.throttle_neutral_us) /
+      static_cast<double>(calibration.throttle_reverse_us - calibration.throttle_neutral_us));
+  }
+  return command;
 }
 
 }  // namespace jetpilot_bridge_interface

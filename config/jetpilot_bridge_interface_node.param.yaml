@@ -27,5 +27,17 @@
     ## choose between Joy MANUAL and autonomous AUTO.
     publish_mode_request: true
 
+    ## Publish the selected receiver PWM as the same normalized ControlCommand
+    ## contract used by teleop. These values are the inverse of the deployed
+    ## host PWM mapping; Futaba trim is adjusted so both neutral values are 1500 us.
+    publish_propo_command: true
+    propo_frame_id: rc_receiver
+    propo_steering_left_us: 1000
+    propo_steering_neutral_us: 1500
+    propo_steering_right_us: 2000
+    propo_throttle_forward_us: 1000
+    propo_throttle_neutral_us: 1500
+    propo_throttle_reverse_us: 2000
+
     frame_id: jetpilot_bridge
     hardware_id: JPBB-01
