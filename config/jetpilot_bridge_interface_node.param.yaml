@@ -17,7 +17,7 @@
     ## Host-path steering trim in hardware command units. Joy D-pad right/left
     ## adjusts this value by offset_step while the node is running.
     steering_offset: 0.0
-    offset_step: 0.01
+    offset_step: 0.001
 
     ## Historical parameter name. Both Joy MANUAL and autonomous AUTO use the
     ## host path; keep this true so arming requires fresh, fault-free board status.
